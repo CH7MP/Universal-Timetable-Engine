@@ -1,4 +1,4 @@
-# CSBS Department Timetable Generator 📚
+# Universal Timetable Engine 📚
 
 An automated, intelligent timetable scheduling system for college departments with concurrent lab batch support, conflict avoidance, and multiple export formats.
 
@@ -36,8 +36,8 @@ An automated, intelligent timetable scheduling system for college departments wi
 
 ### Step 1: Clone Repository
 ```bash
-git clone https://github.com/yourusername/timetable-generator.git
-cd timetable-generator
+git clone https://github.com/CH7MP/Universal-Timetable-Engine.git)
+cd Universal-Timetable-Engine
 ```
 
 ### Step 2: Set Up MySQL Database
@@ -116,19 +116,6 @@ If not set, app runs without database save (you can still export to Excel/PDF).
 | MySQL JDBC | 8.0.33 | Database connectivity |
 | Java Swing | Built-in | GUI framework |
 
-## 📁 Project Structure
-
-```
-timetable-generator/
-├── src/
-│   └── main/java/
-│       └── TimetableGenerator.java
-├── pom.xml
-├── README.md
-├── .gitignore
-├── LICENSE
-└── DATABASE_SETUP.md
-```
 
 ## 🔧 Troubleshooting
 
@@ -168,7 +155,7 @@ MIT License - See LICENSE file for details
 
 ## 👨‍💻 Author
 
-Your Name
+Shiv Shingade
 
 ## 🤝 Contributing
 
@@ -176,11 +163,11 @@ Feel free to fork, modify, and improve!
 
 ## 📧 Contact
 
-your.email@example.com
+shivshingade18@gmail.com
 
 ---
 
 **Status:** ✅ Production Ready  
-**Last Updated:** 2024  
+**Last Updated:** 2025  
 **Java Version:** 11+  
 **Database:** MySQL 5.7+
