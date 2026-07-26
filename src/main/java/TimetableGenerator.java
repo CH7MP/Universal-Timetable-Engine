@@ -101,6 +101,7 @@ class TimetableGenerator extends JFrame {
             name=n; busy=new int[days][slots];
             for (int[] row : busy) Arrays.fill(row,-1);
         }
+        public String toString() { return name; }
     }
 
     static class Room {
@@ -294,6 +295,7 @@ class TimetableGenerator extends JFrame {
         mainPanel.add(buildSetup(),   "setup");
         mainPanel.add(buildEntry(),   "entry");
         mainPanel.add(buildResult(),  "result");
+        mainPanel.add(buildTeacherView(), "teacherView");
         add(mainPanel);
         cards.show(mainPanel,"welcome");
         pack(); setLocationRelativeTo(null); setVisible(true);
@@ -643,11 +645,22 @@ class TimetableGenerator extends JFrame {
         JButton regenBtn  = topBtn("↺ Regenerate",         new Color(230, 242, 255), PRIMARY,     new Color(180, 200, 240));
         JButton pdfBtn    = topBtn("🖨 Print / Save PDF",   new Color(245, 245, 247), TEXT_DARK,   new Color(210, 210, 215));
         JButton xlsxBtn   = topBtn("📊 Export to Excel",    new Color(33, 115, 70),   Color.WHITE, new Color(20, 90, 50));
+        JButton teacherViewBtn = topBtn(
+                "👨‍🏫 Teacher View",
+                Color.WHITE,
+                TEXT_DARK,
+                new Color(200,205,230)
+        );
         editBtn .addActionListener(e->cards.show(mainPanel,"entry"));
         regenBtn.addActionListener(e->regenerate());
         pdfBtn  .addActionListener(e->printToPdf());
         xlsxBtn .addActionListener(e->exportToExcel());
+        teacherViewBtn.addActionListener(e->{
+            refreshTeacherCombo();
+            cards.show(mainPanel,"teacherView");
+        });
         btns.add(xlsxBtn); btns.add(pdfBtn); btns.add(editBtn); btns.add(regenBtn);
+        btns.add(teacherViewBtn);
         topBar.add(ttl,BorderLayout.WEST); topBar.add(btns,BorderLayout.EAST);
 
         JPanel legend=new JPanel(new FlowLayout(FlowLayout.LEFT,18,6));
@@ -711,6 +724,297 @@ class TimetableGenerator extends JFrame {
         JPanel dot=new JPanel(); dot.setPreferredSize(new Dimension(14,14));
         dot.setBackground(bg); dot.setBorder(new LineBorder(bd,1,true));
         p.add(dot); p.add(styledLabel(text,11,Font.PLAIN,TEXT_DARK)); return p;
+
+        // ═══════════════════════════════════════════════════════════
+        // PANEL — TEACHER TIMETABLE  (new — additive only)
+        // Reuses: existing color palette, styledLabel/primaryButton/
+        // outlineButton/topBtn/legendDot helpers, grid[][][], Assignment,
+        // ConcurrentLab, DAYS, timeSlots, sections, teachers.
+        // Does NOT modify buildResult()/renderResult() or any Student
+        // Timetable rendering logic.
+        // ═══════════════════════════════════════════════════════════
+    }
+
+    JComboBox<Teacher> teacherCombo;
+    JPanel teacherResultHolder;
+
+    JPanel buildTeacherView() {
+        JPanel root = new JPanel(new BorderLayout()); root.setBackground(BG);
+
+        // Top bar — same visual language as the admin result top bar
+        JPanel topBar = new JPanel(new BorderLayout());
+        topBar.setBackground(PRIMARY); topBar.setBorder(new EmptyBorder(13,20,13,20));
+        JLabel ttl = styledLabel("Teacher Timetable", 17, Font.BOLD, Color.WHITE);
+        JButton backBtn = topBtn("← Back", PRIMARY, Color.WHITE, new Color(255,255,255,40));
+        backBtn.addActionListener(e -> cards.show(mainPanel,"result"));
+        JButton teacherPdfBtn = topBtn("🖨 Export as PDF", new Color(245, 245, 247), TEXT_DARK, new Color(210, 210, 215));
+        teacherPdfBtn.addActionListener(e -> printTeacherToPdf((Teacher) teacherCombo.getSelectedItem()));
+        JPanel topBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT,8,0)); topBtns.setBackground(PRIMARY);
+        topBtns.add(teacherPdfBtn); topBtns.add(backBtn);
+        topBar.add(ttl,BorderLayout.WEST); topBar.add(topBtns,BorderLayout.EAST);
+
+        // Selector row — same field/label styling as the rest of the app
+        JPanel selectorRow = new JPanel(new FlowLayout(FlowLayout.LEFT,12,10));
+        selectorRow.setBackground(new Color(232,237,255));
+        selectorRow.setBorder(new EmptyBorder(4,16,4,16));
+        selectorRow.add(styledLabel("Select Teacher:",13,Font.BOLD,TEXT_DARK));
+
+        teacherCombo = new JComboBox<>();
+        teacherCombo.setFont(new Font("Dialog",Font.PLAIN,13));
+        teacherCombo.setPreferredSize(new Dimension(240,32));
+        teacherCombo.setBackground(Color.WHITE);
+        selectorRow.add(teacherCombo);
+
+        JButton viewBtn = primaryButton("View Timetable",160,32);
+        viewBtn.addActionListener(e -> renderTeacherTimetable((Teacher) teacherCombo.getSelectedItem()));
+        selectorRow.add(viewBtn);
+
+        // Legend — reuses the exact same legendDot component/colors as the Student view
+        JPanel legend = new JPanel(new FlowLayout(FlowLayout.LEFT,18,6));
+        legend.setBackground(new Color(232,237,255)); legend.setBorder(new EmptyBorder(0,16,8,16));
+        legend.add(legendDot(new Color(214,230,255),new Color(30,80,200),"Lecture"));
+        legend.add(legendDot(LAB_BG,LAB_BORDER,"Lab"));
+
+        JPanel headerWrap = new JPanel(); headerWrap.setLayout(new BoxLayout(headerWrap,BoxLayout.Y_AXIS));
+        headerWrap.setBackground(new Color(232,237,255));
+        headerWrap.add(selectorRow); headerWrap.add(legend);
+
+        teacherResultHolder = new JPanel();
+        teacherResultHolder.setLayout(new BoxLayout(teacherResultHolder,BoxLayout.Y_AXIS));
+        teacherResultHolder.setBackground(BG); teacherResultHolder.setBorder(new EmptyBorder(18,18,18,18));
+
+        JScrollPane scroll = new JScrollPane(teacherResultHolder); scroll.setBorder(null);
+        scroll.getVerticalScrollBar().setUnitIncrement(22);
+
+        root.add(topBar,BorderLayout.NORTH);
+        JPanel centerWrap = new JPanel(new BorderLayout()); centerWrap.setBackground(BG);
+        centerWrap.add(headerWrap,BorderLayout.NORTH);
+        centerWrap.add(scroll,BorderLayout.CENTER);
+        root.add(centerWrap,BorderLayout.CENTER);
+        return root;
+    }
+
+    /** Repopulates the teacher dropdown from the current `teachers` list (called before showing the card). */
+    void refreshTeacherCombo() {
+        if (teacherCombo == null) return;
+        Teacher previouslySelected = (Teacher) teacherCombo.getSelectedItem();
+        teacherCombo.removeAllItems();
+        for (Teacher t : teachers) teacherCombo.addItem(t);
+        if (teachers.contains(previouslySelected)) teacherCombo.setSelectedItem(previouslySelected);
+        if (teacherCombo.getItemCount() > 0) {
+            renderTeacherTimetable((Teacher) teacherCombo.getSelectedItem());
+        } else {
+            teacherResultHolder.removeAll();
+            JLabel none = styledLabel("No teachers available. Generate a timetable first.",13,Font.PLAIN,TEXT_MUTED);
+            none.setBorder(new EmptyBorder(20,4,0,4));
+            teacherResultHolder.add(none);
+            teacherResultHolder.revalidate(); teacherResultHolder.repaint();
+        }
+    }
+
+    /**
+     * One row per occupied slot for this teacher, across every section/day/slot.
+     * Reads only from existing state (grid + concurrentLabs) — no new data model,
+     * no change to how Assignment/ConcurrentLab are produced or stored.
+     * Shared by the on-screen Teacher View table and the Teacher View PDF export.
+     */
+    List<Object[]> collectTeacherRows(Teacher t) {
+        List<Object[]> rows = new ArrayList<>(); // {day, slot, subjectName, isLab, batchNo, yearLabel, div, room}
+        if (t == null || grid == null) return rows;
+
+        for (int d = 0; d < DAYS.length; d++) {
+            for (int sl = 0; sl < numSlots; sl++) {
+                if (timeSlots.get(sl).isBreak) continue;
+
+                for (int sec = 0; sec < sections.size(); sec++) {
+                    Assignment a = grid[sec][d][sl];
+                    if (a != null && a.teacher == t) {
+                        Section section = sections.get(sec);
+                        rows.add(new Object[]{ d, sl, a.subject.name, a.isLab, a.batchNo,
+                                "Year " + section.year, String.valueOf(section.div),
+                                a.room != null ? a.room.name : "—" });
+                    }
+                }
+                for (ConcurrentLab cl : concurrentLabs) {
+                    if (cl.day == d && (cl.sl1 == sl || cl.sl2 == sl) && cl.teacher == t) {
+                        Section section = sections.get(cl.secIdx);
+                        rows.add(new Object[]{ d, sl, cl.subject.name, true, cl.batchNo,
+                                "Year " + section.year, String.valueOf(section.div),
+                                cl.room != null ? cl.room.name : "—" });
+                    }
+                }
+            }
+        }
+        return rows;
+    }
+
+    void renderTeacherTimetable(Teacher t) {
+        if (teacherResultHolder == null) return;
+        teacherResultHolder.removeAll();
+
+        if (t == null || grid == null) {
+            JLabel none = styledLabel("Select a teacher to view their timetable.",13,Font.PLAIN,TEXT_MUTED);
+            none.setBorder(new EmptyBorder(20,4,0,4));
+            teacherResultHolder.add(none);
+            teacherResultHolder.revalidate(); teacherResultHolder.repaint();
+            return;
+        }
+
+        // Collect this teacher's periods in chronological (day, slot) order
+        List<Object[]> rows = collectTeacherRows(t); // {day, slot, subjectName, isLab, batchNo, yearLabel, div, room}
+
+        JPanel card = new JPanel(); card.setLayout(new BoxLayout(card,BoxLayout.Y_AXIS));
+        card.setBackground(CARD_BG);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(PRIMARY,2,true), new EmptyBorder(0,0,14,0)));
+        card.setAlignmentX(LEFT_ALIGNMENT);
+
+        JPanel hdr = new JPanel(new BorderLayout());
+        hdr.setBackground(new Color(219,234,254)); hdr.setBorder(new EmptyBorder(9,16,9,16));
+        JLabel hdrLbl = new JLabel(t.name + "   |   " + rows.size() + " periods this week");
+        hdrLbl.setFont(new Font("Dialog",Font.BOLD,13)); hdrLbl.setForeground(PRIMARY2);
+        hdr.add(hdrLbl,BorderLayout.WEST);
+        card.add(hdr); card.add(Box.createVerticalStrut(8));
+
+        String[] cols = {"Day","Time","Subject","Class","Division","Room"};
+        Object[][] data = new Object[rows.size()][6];
+        for (int i=0;i<rows.size();i++) {
+            Object[] r = rows.get(i);
+            int d = (int) r[0], sl = (int) r[1];
+            data[i][0] = DAYS[d];
+            data[i][1] = timeSlots.get(sl).label;
+            data[i][2] = ((boolean) r[3] ? r[2] + " (Lab · Batch " + r[4] + ")" : r[2]);
+            data[i][3] = r[5];
+            data[i][4] = r[6];
+            data[i][5] = r[7];
+        }
+
+        JTable table = new JTable(data, cols) {
+            public boolean isCellEditable(int r, int c) { return false; }
+        };
+        table.setRowHeight(32);
+        table.getTableHeader().setFont(new Font("Dialog",Font.BOLD,12));
+        table.getTableHeader().setBackground(new Color(238,242,255));
+        table.getTableHeader().setForeground(TEXT_DARK);
+        table.setShowGrid(true); table.setGridColor(new Color(222,226,245));
+        table.setSelectionBackground(new Color(219,234,254));
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        table.setFont(new Font("Dialog",Font.PLAIN,12));
+
+        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer(){
+            public Component getTableCellRendererComponent(JTable tbl,Object val,boolean sel,boolean foc,int row,int col){
+                JLabel lbl=(JLabel)super.getTableCellRendererComponent(tbl,val,sel,foc,row,col);
+                lbl.setHorizontalAlignment(col==2?LEFT:CENTER);
+                lbl.setBorder(new EmptyBorder(4,8,4,8)); lbl.setOpaque(true);
+                boolean isLabRow = row>=0 && row<rows.size() && (boolean) rows.get(row)[3];
+                if (isLabRow) {
+                    lbl.setBackground(sel?LAB_BG.darker():LAB_BG); lbl.setForeground(new Color(100,60,0));
+                } else {
+                    lbl.setBackground(sel?new Color(219,234,254):Color.WHITE); lbl.setForeground(TEXT_DARK);
+                }
+                return lbl;
+            }
+        });
+
+        if (rows.isEmpty()) {
+            JLabel empty = styledLabel("This teacher has no scheduled periods in the current timetable.",12,Font.PLAIN,TEXT_MUTED);
+            empty.setBorder(new EmptyBorder(10,16,14,16));
+            card.add(empty);
+        } else {
+            card.add(table.getTableHeader());
+            card.add(table);
+        }
+
+        teacherResultHolder.add(card);
+        teacherResultHolder.revalidate(); teacherResultHolder.repaint();
+    }
+
+    /**
+     * Export as PDF — Teacher View only. Reuses collectTeacherRows() for data and
+     * the same PrinterJob/Printable + drawLegendItem/drawCenteredStr/trunc helpers
+     * already used by the Student View's printToPdf(), so "Save as PDF" / "Microsoft
+     * Print to PDF" in the print dialog produces a properly formatted PDF.
+     */
+    void printTeacherToPdf(Teacher t) {
+        if (t == null) { showError("No teacher selected."); return; }
+        List<Object[]> rows = collectTeacherRows(t);
+        if (rows.isEmpty()) { showError("This teacher has no scheduled periods."); return; }
+
+        PrinterJob pj = PrinterJob.getPrinterJob();
+        PageFormat pf = pj.defaultPage();
+        Paper paper = new Paper();
+        double pw=595.28, ph=841.89, mg=26; // portrait
+        paper.setSize(pw,ph); paper.setImageableArea(mg,mg,pw-mg*2,ph-mg*2);
+        pf.setPaper(paper); pf.setOrientation(PageFormat.PORTRAIT);
+
+        final int rowsPerPage = 30;
+        final int totalPages = (int) Math.ceil(rows.size() / (double) rowsPerPage);
+
+        pj.setPrintable((g,pageFormat,pageIndex)->{
+            if (pageIndex>=totalPages) return Printable.NO_SUCH_PAGE;
+            Graphics2D g2=(Graphics2D)g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            double ix=pageFormat.getImageableX(),iy=pageFormat.getImageableY();
+            double iw=pageFormat.getImageableWidth();
+            g2.translate(ix,iy);
+
+            int y=0;
+            g2.setColor(PRIMARY); g2.fillRect(0,y,(int)iw,28);
+            g2.setColor(Color.WHITE); g2.setFont(new Font("Dialog",Font.BOLD,13));
+            g2.drawString("Teacher Timetable  ·  "+t.name
+                    +"  |  Gen #"+currentGenId
+                    +"  |  Page "+(pageIndex+1)+" of "+totalPages, 10, y+19);
+            y+=34;
+
+            drawLegendItem(g2,10,y,new Color(210,230,255),new Color(30,80,200),"Lecture");
+            drawLegendItem(g2,100,y,LAB_BG,LAB_BORDER,"Lab"); y+=18;
+
+            String[] cols={"Day","Time","Subject","Class","Div","Room"};
+            int[] colW={62,90,168,60,40,80};
+            int rowH=20, headerH=20;
+
+            g2.setColor(new Color(238,242,255)); g2.fillRect(0,y,(int)iw,headerH);
+            g2.setColor(new Color(200,208,240)); g2.drawRect(0,y,(int)iw-1,headerH-1);
+            g2.setFont(new Font("Dialog",Font.BOLD,9)); g2.setColor(TEXT_DARK);
+            int hx=0;
+            for (int c=0;c<cols.length;c++){ g2.drawString(cols[c],hx+4,y+14); hx+=colW[c]; }
+            y+=headerH;
+
+            int start=pageIndex*rowsPerPage, end=Math.min(start+rowsPerPage, rows.size());
+            g2.setFont(new Font("Dialog",Font.PLAIN,9));
+            for (int i=start;i<end;i++) {
+                Object[] r=rows.get(i);
+                int d=(int) r[0], sl=(int) r[1];
+                boolean isLab=(boolean) r[3];
+
+                g2.setColor(isLab?LAB_BG:Color.WHITE); g2.fillRect(0,y,(int)iw,rowH);
+                g2.setColor(new Color(210,215,240)); g2.drawRect(0,y,(int)iw-1,rowH-1);
+                g2.setColor(isLab?new Color(100,60,0):TEXT_DARK);
+
+                String subjS = (String) r[2] + (isLab ? " (Lab·B"+r[4]+")" : "");
+                String[] vals = { DAYS[d], timeSlots.get(sl).label, trunc(subjS,26),
+                        (String) r[5], (String) r[6], (String) r[7] };
+                int rx=0;
+                for (int c=0;c<vals.length;c++){ g2.drawString(vals[c],rx+4,y+14); rx+=colW[c]; }
+                y+=rowH;
+            }
+
+            g2.setFont(new Font("Dialog",Font.ITALIC,8)); g2.setColor(TEXT_MUTED);
+            g2.drawString("Teacher Timetable  ·  "+t.name
+                    +"  ·  Gen #"+currentGenId
+                    +"  ·  Page "+(pageIndex+1)+" of "+totalPages, 0, y+14);
+            return Printable.PAGE_EXISTS;
+        },pf);
+
+        if (pj.printDialog()) {
+            try {
+                pj.print();
+                JOptionPane.showMessageDialog(this,
+                        "Sent to printer.\n\nTo save as PDF: choose 'Save as PDF' or 'Microsoft Print to PDF'.",
+                        "Print",JOptionPane.INFORMATION_MESSAGE);
+            } catch (PrinterException ex){showError("Print failed: "+ex.getMessage());}
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
