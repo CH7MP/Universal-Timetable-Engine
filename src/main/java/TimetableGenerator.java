@@ -112,6 +112,7 @@ class TimetableGenerator extends JFrame {
             name=n; isLab=lab; busy=new int[days][slots];
             for (int[] row : busy) Arrays.fill(row,-1);
         }
+        public String toString() { return name + (isLab ? " (Lab)" : ""); }   // ← ADD THIS LINE
     }
 
     static class TimeSlot {
@@ -296,6 +297,7 @@ class TimetableGenerator extends JFrame {
         mainPanel.add(buildEntry(),   "entry");
         mainPanel.add(buildResult(),  "result");
         mainPanel.add(buildTeacherView(), "teacherView");
+        mainPanel.add(buildClassroomView(), "classroomView");
         add(mainPanel);
         cards.show(mainPanel,"welcome");
         pack(); setLocationRelativeTo(null); setVisible(true);
@@ -651,6 +653,12 @@ class TimetableGenerator extends JFrame {
                 TEXT_DARK,
                 new Color(200,205,230)
         );
+        JButton classroomViewBtn = topBtn(
+                "🏫 Classroom View",
+                Color.WHITE,
+                TEXT_DARK,
+                new Color(200,205,230)
+        );
         editBtn .addActionListener(e->cards.show(mainPanel,"entry"));
         regenBtn.addActionListener(e->regenerate());
         pdfBtn  .addActionListener(e->printToPdf());
@@ -659,8 +667,13 @@ class TimetableGenerator extends JFrame {
             refreshTeacherCombo();
             cards.show(mainPanel,"teacherView");
         });
+        classroomViewBtn.addActionListener(e->{
+            refreshClassroomCombo();
+            cards.show(mainPanel,"classroomView");
+        });
         btns.add(xlsxBtn); btns.add(pdfBtn); btns.add(editBtn); btns.add(regenBtn);
         btns.add(teacherViewBtn);
+        btns.add(classroomViewBtn);
         topBar.add(ttl,BorderLayout.WEST); topBar.add(btns,BorderLayout.EAST);
 
         JPanel legend=new JPanel(new FlowLayout(FlowLayout.LEFT,18,6));
@@ -737,6 +750,8 @@ class TimetableGenerator extends JFrame {
 
     JComboBox<Teacher> teacherCombo;
     JPanel teacherResultHolder;
+    JComboBox<Room> classroomCombo;
+    JPanel classroomResultHolder;
 
     JPanel buildTeacherView() {
         JPanel root = new JPanel(new BorderLayout()); root.setBackground(BG);
@@ -794,6 +809,57 @@ class TimetableGenerator extends JFrame {
         return root;
     }
 
+    JPanel buildClassroomView() {
+        JPanel root = new JPanel(new BorderLayout()); root.setBackground(BG);
+
+        JPanel topBar = new JPanel(new BorderLayout());
+        topBar.setBackground(PRIMARY); topBar.setBorder(new EmptyBorder(13,20,13,20));
+        JLabel ttl = styledLabel("Classroom Timetable", 17, Font.BOLD, Color.WHITE);
+        JButton backBtn = topBtn("← Back", PRIMARY, Color.WHITE, new Color(255,255,255,40));
+        backBtn.addActionListener(e -> cards.show(mainPanel,"result"));
+        JPanel topBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT,8,0)); topBtns.setBackground(PRIMARY);
+        topBtns.add(backBtn);
+        topBar.add(ttl,BorderLayout.WEST); topBar.add(topBtns,BorderLayout.EAST);
+
+        JPanel selectorRow = new JPanel(new FlowLayout(FlowLayout.LEFT,12,10));
+        selectorRow.setBackground(new Color(232,237,255));
+        selectorRow.setBorder(new EmptyBorder(4,16,4,16));
+        selectorRow.add(styledLabel("Select Classroom / Lab:",13,Font.BOLD,TEXT_DARK));
+
+        classroomCombo = new JComboBox<>();
+        classroomCombo.setFont(new Font("Dialog",Font.PLAIN,13));
+        classroomCombo.setPreferredSize(new Dimension(240,32));
+        classroomCombo.setBackground(Color.WHITE);
+        selectorRow.add(classroomCombo);
+
+        JButton viewBtn = primaryButton("View Timetable",160,32);
+        viewBtn.addActionListener(e -> renderClassroomTimetable((Room) classroomCombo.getSelectedItem()));
+        selectorRow.add(viewBtn);
+
+        JPanel legend = new JPanel(new FlowLayout(FlowLayout.LEFT,18,6));
+        legend.setBackground(new Color(232,237,255)); legend.setBorder(new EmptyBorder(0,16,8,16));
+        legend.add(legendDot(new Color(214,230,255),new Color(30,80,200),"Lecture"));
+        legend.add(legendDot(LAB_BG,LAB_BORDER,"Lab"));
+
+        JPanel headerWrap = new JPanel(); headerWrap.setLayout(new BoxLayout(headerWrap,BoxLayout.Y_AXIS));
+        headerWrap.setBackground(new Color(232,237,255));
+        headerWrap.add(selectorRow); headerWrap.add(legend);
+
+        classroomResultHolder = new JPanel();
+        classroomResultHolder.setLayout(new BoxLayout(classroomResultHolder,BoxLayout.Y_AXIS));
+        classroomResultHolder.setBackground(BG); classroomResultHolder.setBorder(new EmptyBorder(18,18,18,18));
+
+        JScrollPane scroll = new JScrollPane(classroomResultHolder); scroll.setBorder(null);
+        scroll.getVerticalScrollBar().setUnitIncrement(22);
+
+        root.add(topBar,BorderLayout.NORTH);
+        JPanel centerWrap = new JPanel(new BorderLayout()); centerWrap.setBackground(BG);
+        centerWrap.add(headerWrap,BorderLayout.NORTH);
+        centerWrap.add(scroll,BorderLayout.CENTER);
+        root.add(centerWrap,BorderLayout.CENTER);
+        return root;
+    }
+
     /** Repopulates the teacher dropdown from the current `teachers` list (called before showing the card). */
     void refreshTeacherCombo() {
         if (teacherCombo == null) return;
@@ -809,6 +875,23 @@ class TimetableGenerator extends JFrame {
             none.setBorder(new EmptyBorder(20,4,0,4));
             teacherResultHolder.add(none);
             teacherResultHolder.revalidate(); teacherResultHolder.repaint();
+        }
+    }
+
+    void refreshClassroomCombo() {
+        if (classroomCombo == null) return;
+        Room previouslySelected = (Room) classroomCombo.getSelectedItem();
+        classroomCombo.removeAllItems();
+        for (Room r : rooms) classroomCombo.addItem(r);
+        if (rooms.contains(previouslySelected)) classroomCombo.setSelectedItem(previouslySelected);
+        if (classroomCombo.getItemCount() > 0) {
+            renderClassroomTimetable((Room) classroomCombo.getSelectedItem());
+        } else {
+            classroomResultHolder.removeAll();
+            JLabel none = styledLabel("No classrooms/labs available. Generate a timetable first.",13,Font.PLAIN,TEXT_MUTED);
+            none.setBorder(new EmptyBorder(20,4,0,4));
+            classroomResultHolder.add(none);
+            classroomResultHolder.revalidate(); classroomResultHolder.repaint();
         }
     }
 
@@ -841,6 +924,34 @@ class TimetableGenerator extends JFrame {
                         rows.add(new Object[]{ d, sl, cl.subject.name, true, cl.batchNo,
                                 "Year " + section.year, String.valueOf(section.div),
                                 cl.room != null ? cl.room.name : "—" });
+                    }
+                }
+            }
+        }
+        return rows;
+    }
+
+    List<Object[]> collectClassroomRows(Room room) {
+        List<Object[]> rows = new ArrayList<>(); // {day, slot, subjectName, teacherName, isLab, batchNo, yearLabel, div}
+        if (room == null || grid == null) return rows;
+
+        for (int d = 0; d < DAYS.length; d++) {
+            for (int sl = 0; sl < numSlots; sl++) {
+                if (timeSlots.get(sl).isBreak) continue;
+
+                for (int sec = 0; sec < sections.size(); sec++) {
+                    Assignment a = grid[sec][d][sl];
+                    if (a != null && a.room == room) {
+                        Section section = sections.get(sec);
+                        rows.add(new Object[]{ d, sl, a.subject.name, a.teacher.name, a.isLab, a.batchNo,
+                                "Year " + section.year, String.valueOf(section.div) });
+                    }
+                }
+                for (ConcurrentLab cl : concurrentLabs) {
+                    if (cl.day == d && (cl.sl1 == sl || cl.sl2 == sl) && cl.room == room) {
+                        Section section = sections.get(cl.secIdx);
+                        rows.add(new Object[]{ d, sl, cl.subject.name, cl.teacher.name, true, cl.batchNo,
+                                "Year " + section.year, String.valueOf(section.div) });
                     }
                 }
             }
@@ -1015,6 +1126,88 @@ class TimetableGenerator extends JFrame {
                         "Print",JOptionPane.INFORMATION_MESSAGE);
             } catch (PrinterException ex){showError("Print failed: "+ex.getMessage());}
         }
+    }
+
+    void renderClassroomTimetable(Room room) {
+        if (classroomResultHolder == null) return;
+        classroomResultHolder.removeAll();
+
+        if (room == null || grid == null) {
+            JLabel none = styledLabel("Select a classroom to view its timetable.",13,Font.PLAIN,TEXT_MUTED);
+            none.setBorder(new EmptyBorder(20,4,0,4));
+            classroomResultHolder.add(none);
+            classroomResultHolder.revalidate(); classroomResultHolder.repaint();
+            return;
+        }
+
+        List<Object[]> rows = collectClassroomRows(room);
+
+        JPanel card = new JPanel(); card.setLayout(new BoxLayout(card,BoxLayout.Y_AXIS));
+        card.setBackground(CARD_BG);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(PRIMARY,2,true), new EmptyBorder(0,0,14,0)));
+        card.setAlignmentX(LEFT_ALIGNMENT);
+
+        JPanel hdr = new JPanel(new BorderLayout());
+        hdr.setBackground(new Color(219,234,254)); hdr.setBorder(new EmptyBorder(9,16,9,16));
+        JLabel hdrLbl = new JLabel(room.name + (room.isLab ? " (Lab)" : " (Classroom)")
+                + "   |   " + rows.size() + " periods this week");
+        hdrLbl.setFont(new Font("Dialog",Font.BOLD,13)); hdrLbl.setForeground(PRIMARY2);
+        hdr.add(hdrLbl,BorderLayout.WEST);
+        card.add(hdr); card.add(Box.createVerticalStrut(8));
+
+        String[] cols = {"Day","Time","Subject","Teacher","Class","Division"};
+        Object[][] data = new Object[rows.size()][6];
+        for (int i=0;i<rows.size();i++) {
+            Object[] r = rows.get(i);
+            int d = (int) r[0], sl = (int) r[1];
+            boolean isLab = (boolean) r[4];
+            data[i][0] = DAYS[d];
+            data[i][1] = timeSlots.get(sl).label;
+            data[i][2] = isLab ? r[2] + " (Lab · Batch " + r[5] + ")" : r[2];
+            data[i][3] = r[3];
+            data[i][4] = r[6];
+            data[i][5] = r[7];
+        }
+
+        JTable table = new JTable(data, cols) {
+            public boolean isCellEditable(int r, int c) { return false; }
+        };
+        table.setRowHeight(32);
+        table.getTableHeader().setFont(new Font("Dialog",Font.BOLD,12));
+        table.getTableHeader().setBackground(new Color(238,242,255));
+        table.getTableHeader().setForeground(TEXT_DARK);
+        table.setShowGrid(true); table.setGridColor(new Color(222,226,245));
+        table.setSelectionBackground(new Color(219,234,254));
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        table.setFont(new Font("Dialog",Font.PLAIN,12));
+
+        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer(){
+            public Component getTableCellRendererComponent(JTable tbl,Object val,boolean sel,boolean foc,int row,int col){
+                JLabel lbl=(JLabel)super.getTableCellRendererComponent(tbl,val,sel,foc,row,col);
+                lbl.setHorizontalAlignment(col==2?LEFT:CENTER);
+                lbl.setBorder(new EmptyBorder(4,8,4,8)); lbl.setOpaque(true);
+                boolean isLabRow = row>=0 && row<rows.size() && (boolean) rows.get(row)[4];
+                if (isLabRow) {
+                    lbl.setBackground(sel?LAB_BG.darker():LAB_BG); lbl.setForeground(new Color(100,60,0));
+                } else {
+                    lbl.setBackground(sel?new Color(219,234,254):Color.WHITE); lbl.setForeground(TEXT_DARK);
+                }
+                return lbl;
+            }
+        });
+
+        if (rows.isEmpty()) {
+            JLabel empty = styledLabel("This classroom has no scheduled periods in the current timetable.",12,Font.PLAIN,TEXT_MUTED);
+            empty.setBorder(new EmptyBorder(10,16,14,16));
+            card.add(empty);
+        } else {
+            card.add(table.getTableHeader());
+            card.add(table);
+        }
+
+        classroomResultHolder.add(card);
+        classroomResultHolder.revalidate(); classroomResultHolder.repaint();
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1383,6 +1576,13 @@ class TimetableGenerator extends JFrame {
 
         int S = sections.size();
 
+        // Reset room/teacher busy trackers and rebuild them as we compact, so that
+        // shifting one section's assignments earlier in the day can never silently
+        // create a room or teacher clash with a DIFFERENT section using that same
+        // physical resource. (Also fixes these arrays being stale after compaction.)
+        for (Teacher t : teachers) { t.busy = new int[DAYS.length][numSlots]; for (int[] row : t.busy) Arrays.fill(row,-1); }
+        for (Room r : rooms)       { r.busy = new int[DAYS.length][numSlots]; for (int[] row : r.busy) Arrays.fill(row,-1); }
+
         for (int sec = 0; sec < S; sec++) {
 
             for (int d = 0; d < DAYS.length; d++) {
@@ -1416,12 +1616,19 @@ class TimetableGenerator extends JFrame {
                             int sl1 = nonBreakSlots.get(ptr);
                             int sl2 = nonBreakSlots.get(ptr + 1);
 
-                            // Ensure REAL consecutive slots
+                            // Ensure REAL consecutive slots AND that the room/teacher
+                            // aren't already claimed here by another section's compacted slot
                             if (sl2 == sl1 + 1 &&
                                     !timeSlots.get(sl1).isBreak &&
-                                    !timeSlots.get(sl2).isBreak) {
+                                    !timeSlots.get(sl2).isBreak &&
+                                    a.room.busy[d][sl1] == -1 && a.room.busy[d][sl2] == -1 &&
+                                    a.teacher.busy[d][sl1] == -1 && a.teacher.busy[d][sl2] == -1) {
 
                                 grid[sec][d][sl1] = a;
+                                a.room.busy[d][sl1] = sec; a.room.busy[d][sl2] = sec;
+                                a.teacher.busy[d][sl1] = sec; a.teacher.busy[d][sl2] = sec;
+
+                                // continuation
 
                                 // continuation
                                 if (i + 1 < collected.size()) {
@@ -1453,8 +1660,10 @@ class TimetableGenerator extends JFrame {
                     else if (!a.labContinued) {
                         while (ptr < nonBreakSlots.size()) {
                             int sl = nonBreakSlots.get(ptr);
-                            if (grid[sec][d][sl] == null) {
+                            if (grid[sec][d][sl] == null &&
+                                    a.room.busy[d][sl] == -1 && a.teacher.busy[d][sl] == -1) {
                                 grid[sec][d][sl] = a;
+                                a.room.busy[d][sl] = sec; a.teacher.busy[d][sl] = sec;
                                 ptr++;
                                 break;
                             }
@@ -1469,6 +1678,10 @@ class TimetableGenerator extends JFrame {
                         if (newSl1 != null) {
                             cl.sl1 = newSl1;
                             cl.sl2 = newSl1 + 1;
+                            // Reserve the concurrent batch's own room/teacher at the
+                            // new position too, so a later section can't collide with it
+                            cl.room.busy[d][cl.sl1] = sec; cl.room.busy[d][cl.sl2] = sec;
+                            cl.teacher.busy[d][cl.sl1] = sec; cl.teacher.busy[d][cl.sl2] = sec;
                         }
                     }
                 }
