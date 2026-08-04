@@ -659,6 +659,7 @@ class TimetableGenerator extends JFrame {
                 TEXT_DARK,
                 new Color(200,205,230)
         );
+
         editBtn .addActionListener(e->cards.show(mainPanel,"entry"));
         regenBtn.addActionListener(e->regenerate());
         pdfBtn  .addActionListener(e->printToPdf());
@@ -818,6 +819,13 @@ class TimetableGenerator extends JFrame {
         JButton backBtn = topBtn("← Back", PRIMARY, Color.WHITE, new Color(255,255,255,40));
         backBtn.addActionListener(e -> cards.show(mainPanel,"result"));
         JPanel topBtns = new JPanel(new FlowLayout(FlowLayout.RIGHT,8,0)); topBtns.setBackground(PRIMARY);
+        JButton classroomXlsxBtn = topBtn("📊 Export to Excel", new Color(33, 115, 70), Color.WHITE, new Color(20, 90, 50));
+        classroomXlsxBtn.addActionListener(e -> exportClassroomToExcel((Room) classroomCombo.getSelectedItem()));
+        JButton classroomPdfBtn = topBtn("🖨 Export as PDF", new Color(245, 245, 247), TEXT_DARK, new Color(210, 210, 215));
+        classroomPdfBtn.addActionListener(e -> printClassroomToPdf((Room) classroomCombo.getSelectedItem()));
+
+        topBtns.add(classroomXlsxBtn);
+        topBtns.add(classroomPdfBtn);
         topBtns.add(backBtn);
         topBar.add(ttl,BorderLayout.WEST); topBar.add(topBtns,BorderLayout.EAST);
 
@@ -2304,9 +2312,293 @@ class TimetableGenerator extends JFrame {
         }
     }
 
+
+    void exportClassroomToExcel(Room room) {
+        if (room == null) { showError("No classroom/lab selected."); return; }
+        if (sections.isEmpty()) { showError("No timetable generated yet."); return; }
+
+        List<Object[]> rows = collectClassroomRows(room); // {day, slot, subjectName, teacherName, isLab, batchNo, yearLabel, div}
+        Object[][][] cellData = new Object[DAYS.length][numSlots][];
+        for (Object[] r : rows) {
+            int d = (int) r[0], sl = (int) r[1];
+            cellData[d][sl] = r;
+        }
+
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("Save Classroom Timetable as Excel");
+        fc.setSelectedFile(new File(room.name.replaceAll("[^a-zA-Z0-9]","_") + "_Gen" + currentGenId + ".xlsx"));
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Excel Workbook (*.xlsx)", "xlsx"));
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
+
+        File outFile = fc.getSelectedFile();
+        if (!outFile.getName().toLowerCase().endsWith(".xlsx"))
+            outFile = new File(outFile.getAbsolutePath() + ".xlsx");
+
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+
+            java.util.function.BiFunction<short[], Boolean, XSSFCellStyle> mkStyle = (rgb, bold) -> {
+                XSSFCellStyle st = wb.createCellStyle();
+                XSSFFont font = wb.createFont();
+                font.setBold(bold);
+                font.setFontHeightInPoints((short) 9);
+                st.setFont(font);
+                st.setAlignment(HorizontalAlignment.CENTER);
+                st.setVerticalAlignment(VerticalAlignment.CENTER);
+                st.setWrapText(true);
+                st.setBorderTop(BorderStyle.THIN);
+                st.setBorderBottom(BorderStyle.THIN);
+                st.setBorderLeft(BorderStyle.THIN);
+                st.setBorderRight(BorderStyle.THIN);
+                if (rgb != null) {
+                    XSSFColor color = new XSSFColor(new byte[]{(byte)(int)rgb[0],(byte)(int)rgb[1],(byte)(int)rgb[2]}, null);
+                    st.setFillForegroundColor(color);
+                    st.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+                }
+                return st;
+            };
+
+            XSSFCellStyle styleHeader  = mkStyle.apply(new short[]{25, 90,190}, true);
+            XSSFCellStyle styleDay     = mkStyle.apply(new short[]{219,234,254}, true);
+            XSSFCellStyle styleBreak   = mkStyle.apply(new short[]{228,230,238}, false);
+            XSSFCellStyle styleLab     = mkStyle.apply(new short[]{255,241,196}, true);
+            XSSFCellStyle styleFree    = mkStyle.apply(new short[]{248,248,252}, false);
+            XSSFCellStyle styleTime    = mkStyle.apply(new short[]{238,242,255}, true);
+            XSSFCellStyle styleTitle   = mkStyle.apply(new short[]{25, 90,190}, true);
+            XSSFCellStyle styleLecture = mkStyle.apply(new short[]{219,234,254}, false);
+
+            XSSFFont whiteFont = wb.createFont();
+            whiteFont.setBold(true); whiteFont.setFontHeightInPoints((short)11); whiteFont.setColor(IndexedColors.WHITE.getIndex());
+            styleHeader.setFont(whiteFont);
+            styleTitle.setFont(whiteFont);
+
+            String sheetName = room.name.length()>28 ? room.name.substring(0,28) : room.name;
+            XSSFSheet sheet = wb.createSheet(sheetName);
+            sheet.setDefaultColumnWidth(18);
+            sheet.setDefaultRowHeightInPoints(36);
+
+            int rowNum = 0;
+
+            XSSFRow titleRow = sheet.createRow(rowNum++);
+            titleRow.setHeightInPoints(28);
+            XSSFCell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("Classroom Timetable Blueprint  ·  " + room.name
+                    + (room.isLab ? " (Lab)" : " (Classroom)") + "  |  Gen #" + currentGenId);
+            titleCell.setCellStyle(styleTitle);
+            sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, DAYS.length));
+
+            XSSFRow dayRow = sheet.createRow(rowNum++);
+            dayRow.setHeightInPoints(20);
+            XSSFCell timeHdr = dayRow.createCell(0);
+            timeHdr.setCellValue("Time Slot");
+            timeHdr.setCellStyle(styleHeader);
+            sheet.setColumnWidth(0, 5000);
+            for (int d = 0; d < DAYS.length; d++) {
+                XSSFCell dc = dayRow.createCell(d + 1);
+                dc.setCellValue(DAYS[d]);
+                dc.setCellStyle(styleDay);
+            }
+
+            for (int sl = 0; sl < numSlots; sl++) {
+                TimeSlot ts = timeSlots.get(sl);
+                XSSFRow row = sheet.createRow(rowNum++);
+                row.setHeightInPoints(ts.isBreak ? 16 : 52);
+
+                XSSFCell timeCell = row.createCell(0);
+                timeCell.setCellValue(ts.label);
+                timeCell.setCellStyle(ts.isBreak ? styleBreak : styleTime);
+
+                for (int d = 0; d < DAYS.length; d++) {
+                    XSSFCell cell = row.createCell(d + 1);
+
+                    if (ts.isBreak) {
+                        cell.setCellValue("— Break —");
+                        cell.setCellStyle(styleBreak);
+                        continue;
+                    }
+
+                    Object[] r = cellData[d][sl];
+                    if (r == null) {
+                        cell.setCellValue("○ Free");
+                        cell.setCellStyle(styleFree);
+                    } else {
+                        boolean isLab = (boolean) r[4];
+                        String subjS = (String) r[2] + (isLab ? " (Lab·B"+r[5]+")" : "");
+                        cell.setCellValue(subjS + "\n" + (String) r[3] + "\n[" + r[6] + " " + r[7] + "]");
+                        cell.setCellStyle(isLab ? styleLab : styleLecture);
+                    }
+                }
+            }
+
+            rowNum++;
+            XSSFRow legendHdr = sheet.createRow(rowNum++);
+            legendHdr.setHeightInPoints(16);
+            XSSFCell lh = legendHdr.createCell(0);
+            lh.setCellValue("Legend");
+            lh.setCellStyle(styleHeader);
+            sheet.addMergedRegion(new CellRangeAddress(rowNum-1, rowNum-1, 0, 2));
+
+            String[][] legendItems = {
+                    {"Lecture",     "Blue cell — Subject, Teacher, Class/Division"},
+                    {"Lab",         "Yellow — Subject (Lab·Batch), Teacher, Class/Division"},
+                    {"Free period", "Near-white — no class scheduled in this room"},
+                    {"Break",       "Grey — Recess / Lunch break"}
+            };
+            for (String[] item : legendItems) {
+                XSSFRow lr = sheet.createRow(rowNum++);
+                lr.setHeightInPoints(14);
+                lr.createCell(0).setCellValue(item[0]);
+                lr.createCell(1).setCellValue(item[1]);
+            }
+
+            for (int d = 0; d <= DAYS.length; d++) sheet.autoSizeColumn(d);
+            sheet.setColumnWidth(0, 4800);
+
+            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                wb.write(fos);
+            }
+
+            JOptionPane.showMessageDialog(this,
+                    "Excel file saved:\n" + outFile.getAbsolutePath(),
+                    "Export Successful", JOptionPane.INFORMATION_MESSAGE);
+
+        } catch (IOException ex) {
+            showError("Excel export failed: " + ex.getMessage());
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════
     // PRINT / PDF
     // ═══════════════════════════════════════════════════════════
+
+    void printClassroomToPdf(Room room) {
+        if (room == null) { showError("No classroom/lab selected."); return; }
+        if (sections.isEmpty()) { showError("No timetable generated yet."); return; }
+
+        List<Object[]> rows = collectClassroomRows(room);
+        Object[][][] cellData = new Object[DAYS.length][numSlots][];
+        for (Object[] r : rows) {
+            int d = (int) r[0], sl = (int) r[1];
+            cellData[d][sl] = r;
+        }
+
+        PrinterJob pj = PrinterJob.getPrinterJob();
+        PageFormat pf = pj.defaultPage();
+        Paper paper = new Paper();
+        double pw=841.89, ph=595.28, mg=26;
+        paper.setSize(pw,ph); paper.setImageableArea(mg,mg,pw-mg*2,ph-mg*2);
+        pf.setPaper(paper); pf.setOrientation(PageFormat.LANDSCAPE);
+
+        pj.setPrintable((g,pageFormat,pageIndex)->{
+            if (pageIndex>0) return Printable.NO_SUCH_PAGE;
+            Graphics2D g2=(Graphics2D)g;
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            double ix=pageFormat.getImageableX(),iy=pageFormat.getImageableY();
+            double iw=pageFormat.getImageableWidth();
+            g2.translate(ix,iy);
+
+            int y=0;
+            g2.setColor(PRIMARY); g2.fillRect(0,y,(int)iw,28);
+            g2.setColor(Color.WHITE); g2.setFont(new Font("Dialog",Font.BOLD,13));
+            g2.drawString("Classroom Timetable  ·  "+room.name+(room.isLab?" (Lab)":" (Classroom)")
+                    +"  |  Gen #"+currentGenId, 10, y+19);
+            y+=34;
+
+            drawLegendItem(g2,10,y,new Color(210,230,255),new Color(30,80,200),"Lecture");
+            drawLegendItem(g2,100,y,LAB_BG,LAB_BORDER,"Lab");
+            drawLegendItem(g2,170,y,FREE_BG,FREE_FG,"Free");
+            drawLegendItem(g2,225,y,BREAK_BG,BREAK_FG,"Break"); y+=18;
+
+            int timeColW=82,dayColW=(int)((iw-timeColW)/DAYS.length);
+            int rowH=44,breakH=18,headerH=22;
+
+            g2.setColor(new Color(238,242,255)); g2.fillRect(0,y,(int)iw,headerH);
+            g2.setColor(new Color(200,208,240)); g2.drawRect(0,y,(int)iw-1,headerH-1);
+            g2.setFont(new Font("Dialog",Font.BOLD,10)); g2.setColor(TEXT_DARK);
+            g2.drawString("Time Slot",4,y+15);
+            for (int d=0;d<DAYS.length;d++) {
+                int cx=timeColW+d*dayColW; String day=DAYS[d];
+                g2.drawString(day,cx+dayColW/2-g2.getFontMetrics().stringWidth(day)/2,y+15);
+            }
+            y+=headerH;
+
+            for (int sl=0;sl<numSlots;sl++) {
+                TimeSlot ts=timeSlots.get(sl);
+                int rh=ts.isBreak?breakH:rowH;
+                if (ts.isBreak) {
+                    g2.setColor(BREAK_BG); g2.fillRect(0,y,(int)iw,rh);
+                    g2.setColor(BREAK_FG); g2.setFont(new Font("Dialog",Font.ITALIC,8));
+                    g2.drawString("☕ "+ts.label,4,y+rh-4);
+                } else {
+                    g2.setColor(new Color(246,248,255)); g2.fillRect(0,y,timeColW,rh);
+                    g2.setColor(TEXT_MUTED); g2.setFont(new Font("Dialog",Font.BOLD,8));
+                    drawCenteredStr(g2,ts.label,0,y,timeColW,rh);
+                }
+                for (int d=0;d<DAYS.length;d++) {
+                    int cx=timeColW+d*dayColW;
+                    if (ts.isBreak) {
+                        g2.setColor(BREAK_BG); g2.fillRect(cx,y,dayColW,rh);
+                        g2.setColor(BREAK_FG); g2.setFont(new Font("Dialog",Font.ITALIC,8));
+                        String bt="— Break —";
+                        g2.drawString(bt,cx+dayColW/2-g2.getFontMetrics().stringWidth(bt)/2,y+rh-4);
+                    } else {
+                        Object[] r = cellData[d][sl];
+                        if (r==null){
+                            g2.setColor(FREE_BG); g2.fillRect(cx,y,dayColW,rh);
+                            g2.setColor(FREE_FG); g2.setFont(new Font("Dialog",Font.ITALIC,8));
+                            drawCenteredStr(g2,"○ Free",cx,y,dayColW,rh);
+                        } else {
+                            boolean isLab=(boolean) r[4];
+                            String subjCode=(String) r[2];
+                            String teacherName=(String) r[3];
+                            String classDiv=r[6]+" "+r[7];
+                            if (isLab) {
+                                g2.setColor(LAB_BG); g2.fillRect(cx,y,dayColW,rh);
+                                g2.setColor(LAB_BORDER); g2.drawRect(cx,y,dayColW-1,rh-1);
+                                g2.setFont(new Font("Dialog",Font.BOLD,9)); g2.setColor(new Color(100,60,0));
+                                int ty=y+13;
+                                String subjLine=subjCode+" (B"+r[5]+")";
+                                g2.drawString(subjLine,cx+dayColW/2-g2.getFontMetrics().stringWidth(subjLine)/2,ty);
+                                g2.setFont(new Font("Dialog",Font.PLAIN,8)); g2.setColor(new Color(140,90,0));
+                                String tn=trunc(teacherName,13);
+                                g2.drawString(tn,cx+dayColW/2-g2.getFontMetrics().stringWidth(tn)/2,ty+11);
+                                String cd=trunc(classDiv,13);
+                                g2.drawString(cd,cx+dayColW/2-g2.getFontMetrics().stringWidth(cd)/2,ty+22);
+                            } else {
+                                g2.setColor(new Color(219,234,254)); g2.fillRect(cx,y,dayColW,rh);
+                                g2.setColor(new Color(37,99,235)); g2.drawRect(cx,y,dayColW-1,rh-1);
+                                g2.setFont(new Font("Dialog",Font.BOLD,9)); g2.setColor(new Color(30,64,175));
+                                int ty=y+12;
+                                g2.drawString(subjCode,cx+dayColW/2-g2.getFontMetrics().stringWidth(subjCode)/2,ty);
+                                g2.setFont(new Font("Dialog",Font.PLAIN,8)); g2.setColor(new Color(55,60,90));
+                                String tn=trunc(teacherName,13);
+                                g2.drawString(tn,cx+dayColW/2-g2.getFontMetrics().stringWidth(tn)/2,ty+12);
+                                String cd=trunc(classDiv,13);
+                                g2.drawString(cd,cx+dayColW/2-g2.getFontMetrics().stringWidth(cd)/2,ty+22);
+                            }
+                        }
+                    }
+                    g2.setColor(new Color(210,215,240));
+                    g2.drawRect(timeColW+d*dayColW,y,dayColW-1,rh-1);
+                }
+                g2.setColor(new Color(210,215,240));
+                g2.drawRect(0,y,timeColW-1,rh-1);
+                y+=rh;
+            }
+            g2.setFont(new Font("Dialog",Font.ITALIC,8)); g2.setColor(TEXT_MUTED);
+            g2.drawString("Classroom Timetable ·  "+room.name+"  ·  Gen #"+currentGenId, 0, y+14);
+            return Printable.PAGE_EXISTS;
+        },pf);
+
+        if (pj.printDialog()) {
+            try {
+                pj.print();
+                JOptionPane.showMessageDialog(this,
+                        "Sent to printer.\n\nTo save as PDF: choose 'Save as PDF' or 'Microsoft Print to PDF'.",
+                        "Print",JOptionPane.INFORMATION_MESSAGE);
+            } catch (PrinterException ex){showError("Print failed: "+ex.getMessage());}
+        }
+    }
 
     void printToPdf() {
         if (sections.isEmpty()){showError("No timetable generated yet.");return;}
