@@ -154,6 +154,7 @@ The algorithm distributes lectures evenly across the week, preventing heavy days
 MIT License - See LICENSE file for details
 
 ## 👨‍💻 Author
+Aniket Jatkar
 
 Shiv Shingade
 
